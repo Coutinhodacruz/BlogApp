@@ -5,8 +5,8 @@ import com.example.blog.config.MailConfig;
 import com.example.blog.dto.request.JavaMailerRequest;
 import com.example.blog.dto.request.LoginRequest;
 import com.example.blog.dto.request.RegistrationRequest;
-import com.example.blog.dto.request.UpdateRequest;
 import com.example.blog.dto.request.UpdateUserRequest;
+import com.example.blog.dto.response.GetUserResponse;
 import com.example.blog.dto.response.LoginResponse;
 import com.example.blog.dto.response.RegistrationResponse;
 import com.example.blog.dto.response.UpdateResponse;
@@ -15,20 +15,22 @@ import com.example.blog.exception.UserAlreadyExistException;
 import com.example.blog.exception.UserLoginWithInvalidCredentialsException;
 import com.example.blog.exception.UserNotFoundException;
 import com.example.blog.model.User;
+import com.example.blog.repositories.UserRepository;
+import com.example.blog.utils.JwtUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.TextNode;
 import com.github.fge.jackson.jsonpointer.JsonPointer;
 import com.github.fge.jsonpatch.JsonPatch;
-import com.example.blog.repositories.UserRepository;
-import com.example.blog.utils.JwtUtils;
 import com.github.fge.jsonpatch.JsonPatchException;
 import com.github.fge.jsonpatch.JsonPatchOperation;
 import com.github.fge.jsonpatch.ReplaceOperation;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.BeanUtils;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -49,7 +51,7 @@ public class BlogUserService implements UserService{
 
     private final UserRepository userRepository;
 
-//    private final PasswordEncoder passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
 
     private final TokenService tokenService;
 
@@ -66,12 +68,14 @@ public class BlogUserService implements UserService{
         String password = registrationRequest.getPassword();
 //        String passwordHash = passwordEncoder.encode(password);
         String username = registrationRequest.getUsername();
+        String url =  uploadImage(registrationRequest.getProfilePicture());
         if(userAlreadyExist(email)) throw new UserAlreadyExistException(registrationRequest.getEmail() + " " + USER_ALREADY_EXIST_EXCEPTION.getMessage());
 
         User user = new User();
         user.setEmail(email);
         user.setUsername(username);
         user.setPassword(password);
+        user.setProfilePicture(String.valueOf(url));
         user.setIsAdmin(false);
         String token = tokenService.createToken(email);
 
@@ -141,14 +145,33 @@ public class BlogUserService implements UserService{
     }
 
     @Override
-    public UpdateResponse updateProfile(UpdateUserRequest updateUserRequest, Long id) {
-        ModelMapper modelMapper = new ModelMapper();
-
+    public UpdateResponse updateProfile(UpdateUserRequest updateUserRequest, HttpServletRequest servletRequest) throws JsonPatchException {
+//        ModelMapper modelMapper = new ModelMapper();
+//        modelMapper.map();
         String url = uploadImage(updateUserRequest.getProfilePicture());
-        User user = findUserById(id);
+        String userId = tokenVerifier(servletRequest);
+        User user = findUserById(userId);
+        user.setProfilePicture(url);
         JsonPatch updatePatch = buildUpdatePatch(updateUserRequest);
         return applyPatch(updatePatch, user);
     }
+
+    private static String tokenVerifier(HttpServletRequest request) {
+        String verifiedToken = JwtUtils.retrieveAndVerifyToken(request);
+        String customerId = JwtUtils.extractUserIdFromToken(verifiedToken);
+        return customerId;
+    }
+
+//    public UpdateCustomerResponse updateProfile(UpdateCustomerRequest updateCustomerRequest, HttpServletRequest servletRequest) throws JsonPatchException {
+//        String userId = tokenVerifier(servletRequest);
+//        Customer customer = findById(userId);
+//        ModelMapper modelMapper = new ModelMapper();
+//        JsonPatch updatePatch = buildUpdatePatch(updateCustomerRequest);
+//
+//        ObjectMapper objectMapper = new ObjectMapper();
+//        JsonNode customerNode = objectMapper.convertValue(customer, JsonNode.class);
+//        JsonNode updatedNode = updatePatch.apply(customerNode);
+//        Customer updatedCustomer = objectMapper.convertValue(updatedNode, Customer.class);
 
     private JsonPatch buildUpdatePatch(UpdateUserRequest updateUserRequest) {
         Field[] fields = updateUserRequest.getClass().getDeclaredFields();
@@ -161,19 +184,20 @@ public class BlogUserService implements UserService{
     }
 
     private static boolean validateField(UpdateUserRequest updateUserRequest, Field field) {
-        List<String> list = List.of("username", "email", "password", "country", "profileImage");
+        List<String> list = List.of("username", "email", "password", "profileImage");
         field.setAccessible(true);
         try {
-            return field.get(updateUserRequest)!=null &&!list.contains(field.getName());
+            return field.get(updateUserRequest) != null && !list.contains(field.getName());
         } catch (IllegalAccessException e) {
             throw new BlogAppBaseException(e.getMessage());
         }
     }
 
+
     private static ReplaceOperation buildReplaceOperation(UpdateUserRequest updateUserRequest, Field field) {
         field.setAccessible(true);
         try {
-            String path = JSON_PATCH_PATH_PREFIX+field.getName();
+            String path = "/ "+field.getName();
             JsonPointer pointer = new JsonPointer(path);
             var value = field.get(updateUserRequest);
             TextNode node = new TextNode(value.toString());
@@ -207,8 +231,48 @@ public class BlogUserService implements UserService{
     }
 
     private String uploadImage(MultipartFile profileImage) {
-        boolean isFormWithProfileImage = profileImage !=null;
+        boolean isFormWithProfileImage = profileImage != null;
         if (isFormWithProfileImage) return cloudService.upload(profileImage);
         throw new RuntimeException("image upload failed");
     }
+
+//    @Override
+//    public GetUserResponse getUserById(Long id) throws UserNotFoundException{
+//        Optional<User> foundUser = userRepository.findById(id);
+//        User user = foundUser.orElseThrow(
+//                ()->new UserNotFoundException(USER_NOT_FOUND_EXCEPTION.getMessage())
+//        );
+//        return buildUserResponse(user);
+//    }
+
+    private static GetUserResponse buildUserResponse(User savedUser) {
+        return GetUserResponse.builder()
+                .id(savedUser.getId())
+                .username(getFullUserName(savedUser))
+                .email(savedUser.getEmail())
+                .profileImage(savedUser.getProfilePicture())
+                .build();
+    }
+
+    private static String getFullUserName(User savedUser) {
+        return savedUser.getUsername();
+    }
+
+
+//    @Override
+//    public User updateUser(UpdateUserRequest  updateRequest, Long id) {
+//        return userRepository.findById(id).map(userOne -> {
+//            userOne.setUsername(updateRequest.getUsername());
+//            userOne.setEmail(updateRequest.getEmail());
+//            userOne.setPassword(updateRequest.getPassword());
+//
+//            if (updateRequest.getProfilePicture() != null) {
+//                userOne.setProfilePicture(updateRequest.getProfilePicture());
+//            }
+//            log.info("updated user --> {}", userOne);
+//
+//            return userRepository.save(userOne);
+//
+//        }).orElseThrow(() -> new UserNotFoundException("Sorry this student could not be found"));
+//    }
 }
