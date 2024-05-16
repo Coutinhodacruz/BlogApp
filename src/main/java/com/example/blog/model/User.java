@@ -3,7 +3,6 @@ package com.example.blog.model;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -45,7 +44,17 @@ public class User {
     }
 
 
+    @PreUpdate
+    public void setUpdatedAt() {
+        this.updatedAt = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss");
+        updatedAt.format(formatter);
+    }
 
+
+    public boolean isAdmin() {
+        return isAdmin;
+    }
 }
 
 

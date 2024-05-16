@@ -10,10 +10,7 @@ import com.example.blog.dto.response.GetUserResponse;
 import com.example.blog.dto.response.LoginResponse;
 import com.example.blog.dto.response.RegistrationResponse;
 import com.example.blog.dto.response.UpdateResponse;
-import com.example.blog.exception.BlogAppBaseException;
-import com.example.blog.exception.UserAlreadyExistException;
-import com.example.blog.exception.UserLoginWithInvalidCredentialsException;
-import com.example.blog.exception.UserNotFoundException;
+import com.example.blog.exception.*;
 import com.example.blog.model.User;
 import com.example.blog.repositories.UserRepository;
 import com.example.blog.utils.JwtUtils;
@@ -25,10 +22,12 @@ import com.github.fge.jsonpatch.JsonPatch;
 import com.github.fge.jsonpatch.JsonPatchException;
 import com.github.fge.jsonpatch.JsonPatchOperation;
 import com.github.fge.jsonpatch.ReplaceOperation;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.modelmapper.ModelMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -39,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static com.example.blog.dto.response.ResponseMessage.*;
 import static com.example.blog.exception.ExceptionMessage.*;
@@ -116,8 +116,91 @@ public class BlogUserService implements UserService{
         return verifyLoginDetails(email, password);
     }
 
+    @Override
+    public User updateUser(UpdateUserRequest updateRequest, Long id) {
+        Optional<User> optionalStudent = userRepository.findById(id);
+        if (optionalStudent.isPresent()) {
+            User user = optionalStudent.get();
+            user.setUsername(updateRequest.getUsername());
+            user.setEmail(updateRequest.getEmail());
+            user.setPassword(updateRequest.getPassword());
 
-    private LoginResponse verifyLoginDetails(String email, String password) {
+
+            log.info("updated user --> {}", user);
+            return userRepository.save(user);
+        } else {
+            throw new UserNotFoundException("Sorry this user could not be found");
+        }
+    }
+
+    @Override
+    public void logOut(HttpServletResponse response) {
+        try {
+
+            Cookie cookie = new Cookie("access_token", "");
+            cookie.setMaxAge(0);
+            cookie.setHttpOnly(true);
+            cookie.setPath("/");
+            response.addCookie(cookie);
+
+            response.setStatus(200);
+            response.getWriter().write("User has been signed out");
+        } catch (Exception ex) {
+
+            ex.printStackTrace();
+        }
+    }
+
+    @Override
+    public void deleteUser(Long userId, User currentUser)  {
+
+        if (!currentUser.isAdmin() && !currentUser.getId().equals(userId)) {
+            throw new NotAllowedException("You are not allowed to delete this user");
+        }
+        try {
+
+            userRepository.deleteById(userId);
+        } catch (Exception ex) {
+            throw new NotAllowedException("An error occurred while deleting the user");
+        }
+    }
+
+    @Override
+
+    public List<User> getUsers(User currentUser, int startIndex, int limit, String sortDirection){
+        if (!currentUser.isAdmin()) {
+            throw new NotAllowedException("You are not allowed to see all users");
+        }
+        try {
+
+            List<User> users = userRepository.findAll()
+                    .stream()
+                    .sorted((u1, u2) -> {
+                        if (sortDirection.equals("asc")) {
+                            return u1.getCreatedAt().compareTo(u2.getCreatedAt());
+                        } else {
+                            return u2.getCreatedAt().compareTo(u1.getCreatedAt());
+                        }
+                    })
+                    .skip(startIndex)
+                    .limit(limit)
+                    .collect(Collectors.toList());
+
+            return users.stream()
+                    .map(user -> {
+                        user.setPassword(null);
+                        return user;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception ex) {
+            throw new NotAllowedException("An error occurred while retrieving users");
+
+        }
+    }
+
+
+
+        private LoginResponse verifyLoginDetails(String email, String password) {
 
         Optional<User> optionalUser = userRepository.findByEmail(email);
         if (optionalUser.isPresent()) {
@@ -144,34 +227,23 @@ public class BlogUserService implements UserService{
         return loginResponse;
     }
 
-    @Override
-    public UpdateResponse updateProfile(UpdateUserRequest updateUserRequest, HttpServletRequest servletRequest) throws JsonPatchException {
-//        ModelMapper modelMapper = new ModelMapper();
-//        modelMapper.map();
-        String url = uploadImage(updateUserRequest.getProfilePicture());
-        String userId = tokenVerifier(servletRequest);
-        User user = findUserById(userId);
-        user.setProfilePicture(url);
-        JsonPatch updatePatch = buildUpdatePatch(updateUserRequest);
-        return applyPatch(updatePatch, user);
-    }
+//    @Override
+//    public UpdateResponse updateProfile(UpdateUserRequest updateUserRequest, HttpServletRequest servletRequest) throws JsonPatchException {
+//
+//        String url = uploadImage(updateUserRequest.getProfilePicture());
+//        String userId = tokenVerifier(servletRequest);
+//        User user = findUserById(Long.valueOf(userId));
+//        user.setProfilePicture(url);
+//        JsonPatch updatePatch = buildUpdatePatch(updateUserRequest);
+//        return applyPatch(updatePatch, user);
+//    }
 
     private static String tokenVerifier(HttpServletRequest request) {
         String verifiedToken = JwtUtils.retrieveAndVerifyToken(request);
-        String customerId = JwtUtils.extractUserIdFromToken(verifiedToken);
-        return customerId;
+        return JwtUtils.extractUserIdFromToken(verifiedToken);
     }
 
-//    public UpdateCustomerResponse updateProfile(UpdateCustomerRequest updateCustomerRequest, HttpServletRequest servletRequest) throws JsonPatchException {
-//        String userId = tokenVerifier(servletRequest);
-//        Customer customer = findById(userId);
-//        ModelMapper modelMapper = new ModelMapper();
-//        JsonPatch updatePatch = buildUpdatePatch(updateCustomerRequest);
-//
-//        ObjectMapper objectMapper = new ObjectMapper();
-//        JsonNode customerNode = objectMapper.convertValue(customer, JsonNode.class);
-//        JsonNode updatedNode = updatePatch.apply(customerNode);
-//        Customer updatedCustomer = objectMapper.convertValue(updatedNode, Customer.class);
+
 
     private JsonPatch buildUpdatePatch(UpdateUserRequest updateUserRequest) {
         Field[] fields = updateUserRequest.getClass().getDeclaredFields();

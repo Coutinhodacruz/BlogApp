@@ -11,6 +11,9 @@ public enum ExceptionMessage {
 
     INVALID_CREDENTIALS_EXCEPTION("Invalid Credentials"),
 
+    INVALID_AUTHORIZATION_HEADER_EXCEPTION("Invalid authorization header"),
+    VERIFICATION_FAILED_EXCEPTION("Verification Failed"),
+
     MESSAGE_SENT_SUCCESSFULLY("Message sent successfully."),
 
     SUCCESS("Success"),
